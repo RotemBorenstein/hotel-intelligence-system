@@ -24,6 +24,9 @@ LR_NOTEBOOK_PATH = "/Workspace/Users/alon-gilad@campus.technion.ac.il/(Alon Clon
 DELTA_PATH = "/mnt/lab94290/cluster_19/airbnb_h3_simvector"
 NLP_OUTPUT_BASE = "/mnt/lab94290/cluster_19/nlp_outputs"
 
+# FileStore path for charts (accessible via URL)
+FILESTORE_CHARTS_PATH = "/FileStore/hotel_intel_charts"
+
 # Timeouts (seconds) - Both tools take ~15 minutes
 NLP_TIMEOUT = 1200  # 20 minutes for NLP
 LR_TIMEOUT = 1200   # 20 minutes for LR
@@ -66,6 +69,77 @@ def get_source(hotel_id: str) -> str:
 def is_airbnb_property(hotel_id: str) -> bool:
     """Check if property is from Airbnb (supported by new tools)."""
     return hotel_id.startswith("ABB_")
+
+
+def save_chart_to_filestore(b64_data: str, filename: str, property_id: str) -> Optional[str]:
+    """
+    Save a base64-encoded chart to Databricks FileStore and return its URL.
+    
+    Args:
+        b64_data: Base64-encoded image data
+        filename: Name for the file (e.g., 'impact_chart')
+        property_id: Property ID for organizing files
+    
+    The URL format is: https://<workspace>/files/<path>
+    """
+    import base64
+    import os
+    
+    try:
+        # Get dbutils (only available in Databricks)
+        try:
+            from pyspark.dbutils import DBUtils
+            from pyspark.sql import SparkSession
+            spark = SparkSession.builder.getOrCreate()
+            dbutils = DBUtils(spark)
+        except ImportError:
+            # Try getting from globals (set by Databricks runtime)
+            import builtins
+            dbutils = getattr(builtins, 'dbutils', None)
+            if dbutils is None:
+                print("[Chart] dbutils not available - cannot save to FileStore")
+                return None
+        
+        # Decode base64 to bytes
+        img_bytes = base64.b64decode(b64_data)
+        
+        # Create unique path for this property
+        file_path = f"{FILESTORE_CHARTS_PATH}/{property_id}/{filename}.png"
+        
+        # Ensure directory exists
+        dir_path = f"{FILESTORE_CHARTS_PATH}/{property_id}"
+        try:
+            dbutils.fs.mkdirs(dir_path)
+        except:
+            pass  # Directory might already exist
+        
+        # Write file to DBFS (FileStore is part of DBFS)
+        dbutils.fs.put(file_path, b64_data, overwrite=True)
+        
+        # For binary files, we need to use a different approach
+        # FileStore expects files in /dbfs/ path for direct write
+        local_path = f"/dbfs{file_path}"
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        with open(local_path, 'wb') as f:
+            f.write(img_bytes)
+        
+        # Get workspace URL for constructing the file URL
+        try:
+            spark = SparkSession.builder.getOrCreate()
+            workspace_url = spark.conf.get("spark.databricks.workspaceUrl")
+        except:
+            workspace_url = "your-databricks-workspace.cloud.databricks.com"
+        
+        # FileStore URLs follow this pattern
+        url_path = file_path.replace("/FileStore/", "files/")
+        full_url = f"https://{workspace_url}/{url_path}"
+        
+        print(f"[Chart] Saved to: {full_url}")
+        return full_url
+        
+    except Exception as e:
+        print(f"[Chart] Failed to save chart: {e}")
+        return None
 
 
 # ===========================================
@@ -319,16 +393,14 @@ def run_lr_analysis(
         }
 
 
-def format_lr_insights(result: Dict[str, Any], top_n: int = 10) -> str:
+def format_lr_insights(result: Dict[str, Any], top_n: int = 10, property_id: str = None) -> str:
     """
     Format LR insights for LLM consumption.
     
     Args:
         result: Raw LR tool output
         top_n: Number of top insights to include
-        
-    Returns:
-        Formatted string for agent response
+        property_id: Property ID for saving charts
     """
     if result.get("status") != "success":
         return f"Analysis failed: {result.get('error_message', 'Unknown error')}"
@@ -372,6 +444,26 @@ def format_lr_insights(result: Dict[str, Any], top_n: int = 10) -> str:
             output_lines.append(f"   Opportunity: +{opportunity:.3f} potential gain")
         
         output_lines.append("")
+    
+    # Process and save charts if available
+    charts = result.get("charts", {})
+    if charts and property_id:
+        raw_id = extract_raw_id(property_id) if property_id else "unknown"
+        chart_urls = []
+        
+        for chart_name, b64_data in charts.items():
+            if b64_data:
+                url = save_chart_to_filestore(b64_data, chart_name, raw_id)
+                if url:
+                    # Create clickable markdown link
+                    display_name = chart_name.replace("_", " ").title()
+                    chart_urls.append(f"📊 **[{display_name}]({url})**")
+        
+        if chart_urls:
+            output_lines.append("\n=== Visualization Charts ===")
+            output_lines.append("Click the links below to view the analysis charts:\n")
+            output_lines.extend(chart_urls)
+            output_lines.append("")
     
     return "\n".join(output_lines)
 
@@ -514,7 +606,7 @@ def analyze_property_comprehensive(
         results["lr"] = lr_result
         
         if lr_result.get("status") == "success":
-            output_parts.append(format_lr_insights(lr_result))
+            output_parts.append(format_lr_insights(lr_result, property_id=hotel_id))
     
     results["formatted_output"] = "\n\n".join(output_parts)
     return results

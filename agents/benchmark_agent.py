@@ -127,7 +127,7 @@ Property: {self.hotel_name} (ID: {self.hotel_id}) in {self.city}
         if result.get("status") != "success":
             return f"Analysis failed: {result.get('error_message', result.get('message', 'Unknown error'))}"
         
-        return format_lr_insights(result, top_n=int(top_n))
+        return format_lr_insights(result, top_n=int(top_n), property_id=self.hotel_id)
 
     def rank_by_metric(self, metric: str, k: int = 10) -> str:
         """
