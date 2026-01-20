@@ -446,13 +446,22 @@ def format_lr_insights(result: Dict[str, Any], top_n: int = 10, property_id: str
         output_lines.append("")
     
     # Process and save charts if available
+    # Check both 'charts' and 'ui_artifacts.charts' fields (notebook uses ui_artifacts.charts)
     charts = result.get("charts", {})
+    if not charts:
+        ui_artifacts = result.get("ui_artifacts", {})
+        charts = ui_artifacts.get("charts", {}) if isinstance(ui_artifacts, dict) else {}
+    
     if charts and property_id:
         raw_id = extract_raw_id(property_id) if property_id else "unknown"
         chart_urls = []
         
         for chart_name, b64_data in charts.items():
-            if b64_data:
+            # Handle both direct base64 strings and nested dict with 'data' key
+            if isinstance(b64_data, dict):
+                b64_data = b64_data.get("data") or b64_data.get("base64") or b64_data.get("image")
+            
+            if b64_data and isinstance(b64_data, str):
                 url = save_chart_to_filestore(b64_data, chart_name, raw_id)
                 if url:
                     # Create clickable markdown link
