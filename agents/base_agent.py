@@ -391,23 +391,54 @@ class BaseAgent(ABC):
         while iteration < MAX_ITERATIONS:
             iteration += 1
 
-            # Invoke LLM
-            response = llm_with_tools.invoke(messages)
-            messages.append(response)
+            # Invoke LLM - with error recovery for malformed tool calls
+            tool_calls = []
+            response = None
             
-            # Get tool calls - either from proper response or parse malformed ones
-            tool_calls = response.tool_calls if response.tool_calls else []
-            
-            # If no proper tool calls, try to recover from malformed format
-            if not tool_calls and response.content and "<function=" in response.content:
-                tool_calls = self._parse_malformed_tool_calls(response.content, tool_map)
-                if tool_calls:
-                    print(f"[ToolRecovery] Recovered {len(tool_calls)} tool call(s) from malformed format")
+            try:
+                response = llm_with_tools.invoke(messages)
+                messages.append(response)
+                
+                # Get tool calls - either from proper response or parse malformed ones
+                tool_calls = response.tool_calls if response.tool_calls else []
+                
+                # If no proper tool calls, try to recover from malformed format in content
+                if not tool_calls and response.content and "<function=" in response.content:
+                    tool_calls = self._parse_malformed_tool_calls(response.content, tool_map)
+                    if tool_calls:
+                        print(f"[ToolRecovery] Recovered {len(tool_calls)} tool call(s) from response content")
+                        
+            except Exception as e:
+                error_str = str(e)
+                # Check if this is a "tool_use_failed" error with failed_generation (Groq API)
+                if "tool_use_failed" in error_str and "failed_generation" in error_str:
+                    print(f"[ToolRecovery] Caught Groq API tool_use_failed error, attempting recovery...")
+                    
+                    # Extract the failed_generation content from error
+                    import re
+                    match = re.search(r"'failed_generation':\s*'([^']+)'", error_str)
+                    if match:
+                        failed_content = match.group(1)
+                        tool_calls = self._parse_malformed_tool_calls(failed_content, tool_map)
+                        
+                        if tool_calls:
+                            print(f"[ToolRecovery] Recovered {len(tool_calls)} tool call(s) from API error")
+                        else:
+                            # Could not recover, raise the error
+                            raise RuntimeError(f"Tool call failed and could not recover: {error_str[:200]}")
+                    else:
+                        raise RuntimeError(f"Tool call failed: {error_str[:200]}")
+                else:
+                    # Not a tool_use_failed error, re-raise
+                    raise e
 
             # Check if the model wants to stop (no tools called)
             if not tool_calls:
-                final_response = response.content
+                final_response = response.content if response else "No response generated."
                 return self._finalize_response(final_response, return_validation)
+
+            # Track if we recovered from API error (no proper response object)
+            recovered_from_api_error = response is None
 
             # Handle Tool Calls
             for tool_call in tool_calls:
@@ -440,7 +471,11 @@ class BaseAgent(ABC):
                     truncated = result_str
 
                 # Append tool result to history so the model sees it
-                messages.append(ToolMessage(content=truncated, tool_call_id=tool_call["id"]))
+                # Use HumanMessage if recovered from API error (no proper tool_call chain)
+                if recovered_from_api_error:
+                    messages.append(HumanMessage(content=f"Tool '{fn_name}' returned:\n{truncated}"))
+                else:
+                    messages.append(ToolMessage(content=truncated, tool_call_id=tool_call["id"]))
 
         return self._finalize_response("Agent stopped after max iterations.", return_validation)
     
