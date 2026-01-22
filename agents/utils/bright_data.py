@@ -1,29 +1,50 @@
 """
-Bright Data MCP Integration
+Bright Data SERP API Integration
 
-Provides web search and scraping functionality using Bright Data's MCP server.
-Uses the MCP protocol to communicate with the @brightdata/mcp server.
+Provides web search functionality using Bright Data's SERP API.
+Uses direct REST API calls (works on Databricks, no asyncio issues).
 """
 
 import os
-import asyncio
-import subprocess
-import json
+import time
+import urllib.parse
+import requests
 from typing import Optional
+
+# Simple in-memory cache to reduce API usage
+_CACHE = {}
+_CACHE_TTL_SEC = 60 * 30  # 30 minutes
+
+
+def _cache_get(key: str):
+    """Get value from cache if not expired."""
+    item = _CACHE.get(key)
+    if not item:
+        return None
+    value, ts = item
+    if time.time() - ts > _CACHE_TTL_SEC:
+        _CACHE.pop(key, None)
+        return None
+    return value
+
+
+def _cache_set(key: str, value):
+    """Set value in cache with timestamp."""
+    _CACHE[key] = (value, time.time())
 
 
 def search_google_serp(
     query: str,
     num_results: int = 10,
-    country: str = "my"  # Malaysia by default
+    country: str = "us"
 ) -> dict:
     """
-    Search Google using Bright Data's MCP server.
+    Search Google using Bright Data's SERP API (direct REST, no MCP).
     
     Args:
         query: Search query string
         num_results: Number of results to return (default 10)
-        country: Country code for geo-targeting (default "my" for Malaysia)
+        country: Country code for geo-targeting (default "us")
     
     Returns:
         dict with keys:
@@ -31,153 +52,132 @@ def search_google_serp(
             - results: list of dicts with title, snippet, link
             - error: str (if success is False)
     """
-    try:
-        # Run the async function - handle both standalone and notebook environments
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        
-        if loop is not None:
-            # Already in an event loop (e.g., Databricks notebook)
-            # Create a new thread to run the async function
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, _search_via_mcp(query, num_results))
-                return future.result(timeout=60)
-        else:
-            # No running event loop - safe to use asyncio.run()
-            return asyncio.run(_search_via_mcp(query, num_results))
-    except Exception as e:
-        return {
-            "success": False,
-            "results": [],
-            "error": f"MCP search error: {str(e)}"
-        }
-
-
-async def _search_via_mcp(query: str, num_results: int = 10) -> dict:
-    """
-    Internal async function to search via MCP.
-    Uses the Bright Data MCP server's web_data_google_search tool.
-    """
-    from mcp import ClientSession, StdioServerParameters
-    from mcp.client.stdio import stdio_client
-    from dotenv import load_dotenv
-    
-    # Force reload .env to get fresh token
-    load_dotenv(override=True)
-    
     api_token = os.getenv("BRIGHTDATA_API_TOKEN")
-    browser_auth = os.getenv("BROWSER_AUTH", "")
-    
-    print(f"[BrightData MCP] Using token: {api_token[:20] if api_token else 'NOT SET'}...")
-    
     if not api_token:
         return {
             "success": False,
             "results": [],
             "error": "BRIGHTDATA_API_TOKEN not found in environment"
         }
+
+    # Check cache first
+    cache_key = f"serp::{query.lower()}::{num_results}"
+    cached = _cache_get(cache_key)
+    if cached:
+        print(f"[BrightData SERP] Cache hit for: {query[:50]}...")
+        return cached
+
+    base_url = os.getenv("BRIGHTDATA_BASE_URL", "https://api.brightdata.com/request")
+    zone = os.getenv("BRIGHTDATA_ZONE", "serp_api3")
+    format_type = os.getenv("BRIGHTDATA_SERP_FORMAT", "json")
+
+    encoded_query = urllib.parse.quote(query)
+    google_url = f"https://www.google.com/search?q={encoded_query}&num={num_results}&hl=en"
     
-    # Server parameters for @brightdata/mcp
-    server_params = StdioServerParameters(
-        command="npx.cmd",  # Windows uses npx.cmd
-        args=["-y", "@brightdata/mcp"],
-        env={
-            **os.environ,
-            "API_TOKEN": api_token,
-            "PRO_MODE": "true",
-            "GROUPS": "browser,business",
-            "BROWSER_AUTH": browser_auth,
-        }
-    )
+    print(f"[BrightData SERP] Searching: {query[:50]}...")
     
     try:
-        async with stdio_client(server_params) as (read, write):
-            async with ClientSession(read, write) as session:
-                # Initialize the connection
-                await session.initialize()
-                
-                # List available tools to find the search tool
-                tools = await session.list_tools()
-                tool_names = [t.name for t in tools.tools]
-                print(f"[BrightData MCP] Available tools: {tool_names}")
-                
-                # Use scrape_as_markdown to scrape Google search results page
-                # This uses browser-based scraping which may have different auth
-                import urllib.parse
-                
-                if "scrape_as_markdown" in tool_names:
-                    google_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
-                    print(f"[BrightData MCP] Scraping: {google_url}")
-                    result = await session.call_tool("scrape_as_markdown", {"url": google_url})
-                elif "search_engine" in tool_names:
-                    # Fallback to search_engine tool
-                    result = await session.call_tool("search_engine", {"query": query})
-                else:
-                    return {
-                        "success": False,
-                        "results": [],
-                        "error": f"No search tool found. Available: {tool_names}"
-                    }
-                
-                # Parse results from markdown
-                results = []
-                if result and result.content:
-                    for content in result.content:
-                        if hasattr(content, 'text'):
-                            markdown_text = content.text
-                            
-                            # Parse markdown to extract search results
-                            # Google search results in markdown have patterns like:
-                            # ## [Title](URL)
-                            # Snippet text
-                            import re
-                            
-                            # Find result blocks (markdown links followed by text)
-                            pattern = r'\[([^\]]+)\]\(([^)]+)\)(?:\s*\n\s*([^\n]+))?'
-                            matches = re.findall(pattern, markdown_text)
-                            
-                            for title, url, snippet in matches:
-                                # Filter out navigation links and keep only content
-                                if url.startswith('http') and 'tripadvisor' in url.lower() or 'booking' in url.lower() or 'facebook' in url.lower() or 'review' in title.lower():
-                                    results.append({
-                                        "title": title.strip(),
-                                        "snippet": snippet.strip() if snippet else "",
-                                        "link": url
-                                    })
-                            
-                            # If no structured results, split by lines and look for content
-                            if len(results) < 3:
-                                lines = markdown_text.split('\n')
-                                current_result = {"title": "", "snippet": "", "link": ""}
-                                
-                                for line in lines:
-                                    line = line.strip()
-                                    if len(line) > 30 and not line.startswith('#') and not line.startswith('['):
-                                        # Looks like content
-                                        if not current_result["snippet"]:
-                                            current_result["title"] = line[:100]
-                                            current_result["snippet"] = line
-                                        else:
-                                            current_result["snippet"] += " " + line
-                                        
-                                        if len(current_result["snippet"]) > 200:
-                                            results.append(current_result)
-                                            current_result = {"title": "", "snippet": "", "link": ""}
-                
-                return {
-                    "success": True,
-                    "results": results[:num_results] if results else [{"title": "Scraped Content", "snippet": markdown_text[:500], "link": ""}],
-                    "error": None
-                }
-                
+        response = requests.post(
+            base_url,
+            headers={
+                "Authorization": f"Bearer {api_token}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "zone": zone,
+                "url": google_url,
+                "format": format_type
+            },
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            if format_type.lower() == "json":
+                data = response.json()
+            else:
+                data = {"raw": response.text}
+
+            # BrightData /request often wraps payload under "body"
+            if isinstance(data, dict) and "body" in data:
+                body = data.get("body", "")
+                if isinstance(body, dict):
+                    data = body
+                elif isinstance(body, str):
+                    try:
+                        import json
+                        data = json.loads(body)
+                    except Exception:
+                        data = {"raw": body}
+
+            # Extract results from various possible formats
+            results = []
+            
+            # Try organic results (standard SERP API format)
+            if "organic" in data:
+                for item in data["organic"][:num_results]:
+                    results.append({
+                        "title": item.get("title", ""),
+                        "snippet": item.get("description", item.get("snippet", ""))[:300],
+                        "link": item.get("link", item.get("url", ""))
+                    })
+            
+            # Try results array
+            elif "results" in data:
+                for item in data["results"][:num_results]:
+                    results.append({
+                        "title": item.get("title", ""),
+                        "snippet": item.get("snippet", item.get("description", ""))[:300],
+                        "link": item.get("link", item.get("url", ""))
+                    })
+            
+            # Fallback: parse raw HTML/text if present
+            elif "raw" in data:
+                raw = data["raw"]
+                # Try to extract snippets from raw content
+                import re
+                # Look for text blocks that look like search results
+                snippets = re.findall(r'[A-Z][^.!?]*(?:review|hotel|wifi|guest|stay|room|service|clean)[^.!?]*[.!?]', raw, re.IGNORECASE)
+                for i, snippet in enumerate(snippets[:num_results]):
+                    if len(snippet) > 30:
+                        results.append({
+                            "title": f"Result {i+1}",
+                            "snippet": snippet[:300],
+                            "link": ""
+                        })
+            
+            result = {
+                "success": True,
+                "results": results,
+                "error": None
+            }
+            
+            # Cache successful results
+            if results:
+                _cache_set(cache_key, result)
+            
+            print(f"[BrightData SERP] Found {len(results)} results")
+            return result
+            
+        else:
+            error_msg = f"SERP API failed: {response.status_code} - {response.text[:200]}"
+            print(f"[BrightData SERP] Error: {error_msg}")
+            return {
+                "success": False,
+                "results": [],
+                "error": error_msg
+            }
+            
+    except requests.Timeout:
+        return {
+            "success": False,
+            "results": [],
+            "error": "SERP API request timed out (30s)"
+        }
     except Exception as e:
         return {
             "success": False,
             "results": [],
-            "error": f"MCP connection error: {str(e)}"
+            "error": f"SERP API error: {str(e)}"
         }
 
 
@@ -209,6 +209,8 @@ def format_serp_results(results: list, topic_keywords: list = None) -> str:
     for i, r in enumerate(results, 1):
         output += f"[{i}] {r.get('title', 'No title')}\n"
         output += f"    Snippet: {r.get('snippet', 'No snippet')}\n"
-        output += f"    URL: {r.get('link', 'No link')}\n\n"
+        if r.get('link'):
+            output += f"    URL: {r.get('link')}\n"
+        output += "\n"
     
     return output
