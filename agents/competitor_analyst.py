@@ -72,6 +72,37 @@ class CompetitorAnalystAgent(BaseAgent):
         "host communication and responsiveness", "check-in and check-out process",
         "accuracy of listing description", "value for money and pricing"
     ]
+    
+    # Mapping common user terms to NLP topic names
+    TOPIC_ALIASES = {
+        "responsive": "host communication and responsiveness",
+        "responsiveness": "host communication and responsiveness",
+        "response time": "host communication and responsiveness",
+        "communication": "host communication and responsiveness",
+        "host": "host communication and responsiveness",
+        "wifi": "wifi and internet quality",
+        "internet": "wifi and internet quality",
+        "clean": "cleanliness and hygiene",
+        "cleanliness": "cleanliness and hygiene",
+        "noise": "noise and sound disturbances",
+        "quiet": "privacy and quietness",
+        "location": "location and neighborhood",
+        "parking": "parking availability",
+        "check-in": "check-in and check-out process",
+        "check-out": "check-in and check-out process",
+        "price": "value for money and pricing",
+        "value": "value for money and pricing",
+        "bed": "bed comfort and sleep quality",
+        "sleep": "bed comfort and sleep quality",
+        "kitchen": "kitchen and cooking facilities",
+        "bathroom": "bathroom quality",
+        "temperature": "temperature and climate control",
+        "ac": "temperature and climate control",
+        "heating": "temperature and climate control",
+        "maintenance": "maintenance and repairs",
+        "safety": "safety and security",
+        "security": "safety and security",
+    }
 
     def get_system_prompt(self) -> str:
         # Build tool descriptions based on availability
@@ -79,9 +110,12 @@ class CompetitorAnalystAgent(BaseAgent):
 - get_competitor_details: Details about a specific competitor"""
         
         if DATABRICKS_AVAILABLE and is_airbnb_property(self.hotel_id):
-            tool_descriptions = """- analyze_vs_neighbors: Deep NLP analysis comparing reviews (takes 5-10 min)
+            tool_descriptions = """- analyze_vs_neighbors: Deep NLP analysis comparing reviews across all topics (takes 5-10 min)
 """ + tool_descriptions + """
-- get_topic_evidence: Get evidence sentences for a specific topic"""
+- get_topic_evidence: Get specific review evidence for a topic - USE THIS when user asks about a specific topic!"""
+        
+        # List available topics for the agent
+        topics_list = ", ".join([f'"{t}"' for t in self.NLP_TOPICS[:5]]) + "..."
         
         return f"""You are a friendly Competitor Analyst helping the owner of {self.hotel_name} in {self.city}.
 
@@ -94,17 +128,33 @@ YOUR ROLE:
 Help the property owner understand how they compare to similar properties nearby.
 Focus on actionable insights they can use to improve their business.
 
+CRITICAL - TOPIC-SPECIFIC QUESTIONS:
+When the user asks about a SPECIFIC topic (e.g., "responsiveness", "wifi", "cleanliness"):
+1. First run analyze_vs_neighbors to get comparison data
+2. Look for that specific topic in the results (strengths/weaknesses sections)
+3. If you need more detail, use get_topic_evidence with the matching topic name
+4. **Focus your answer on THAT SPECIFIC TOPIC** - don't give a general overview
+
+Topic name mappings (user term → NLP topic):
+- "responsiveness" or "responsive" → "host communication and responsiveness"
+- "wifi" or "internet" → "wifi and internet quality"
+- "clean" or "cleanliness" → "cleanliness and hygiene"
+- "check-in" → "check-in and check-out process"
+- "price" or "value" → "value for money and pricing"
+
+Available NLP topics: {topics_list}
+
 AVAILABLE TOOLS (only use these):
 {tool_descriptions}
 
 HOW TO RESPOND:
 Write conversationally, like you're advising a friend who owns this property.
 
-1. **Use only your available tools** - Don't try to call tools not listed above
-2. **Start with the key insight** - What's the most important thing they should know?
-3. **Explain findings constructively** - Focus on opportunities for improvement
-4. **Give specific recommendations** - What should they actually DO?
-5. **Keep it concise** - Busy owners don't want to read essays.
+1. **Answer the SPECIFIC question asked** - If they ask about responsiveness, focus on responsiveness!
+2. **Find the relevant topic in results** - Look in strengths/weaknesses for the topic they asked about
+3. **Report actual data** - Include negative rates and gaps from the analysis
+4. **Give specific recommendations** - What should they actually DO to improve?
+5. **Keep it focused** - Don't list all topics if they only asked about one
 
 Property: {self.hotel_name} (ID: {self.hotel_id}) in {self.city}
 """
@@ -122,7 +172,7 @@ Property: {self.hotel_name} (ID: {self.hotel_id}) in {self.city}
         
         return tools
 
-    def analyze_vs_neighbors(self, include_evidence: bool = False) -> str:
+    def analyze_vs_neighbors(self, include_evidence: bool = False, focus_topic: str = None) -> str:
         """
         Run comprehensive NLP analysis comparing your property vs neighbors.
         
@@ -133,6 +183,7 @@ Property: {self.hotel_name} (ID: {self.hotel_id}) in {self.city}
         
         Args:
             include_evidence: Whether to include example review sentences (analysis takes 5-10 minutes)
+            focus_topic: Optional - a specific topic to highlight in results (e.g., "responsiveness", "wifi")
         """
         if not DATABRICKS_AVAILABLE:
             return "NLP analysis not available. Use find_competitors_geo instead."
@@ -157,32 +208,87 @@ Property: {self.hotel_name} (ID: {self.hotel_id}) in {self.city}
         neighbors = get_nlp_neighbors(property_id=raw_id)
         evidence = get_nlp_evidence(run_id=result.get("run_id")) if include_evidence else None
         
-        return format_nlp_results(topics, neighbors, include_evidence, evidence)
+        # Format base results
+        output = format_nlp_results(topics, neighbors, include_evidence, evidence)
+        
+        # If a focus topic was specified, add specific data for that topic
+        if focus_topic:
+            focus_topic_lower = focus_topic.lower().strip()
+            matched_topic = self.TOPIC_ALIASES.get(focus_topic_lower, focus_topic)
+            
+            # Find the topic in results
+            topic_data = None
+            for t in topics:
+                if matched_topic.lower() in t.get("topic", "").lower():
+                    topic_data = t
+                    break
+            
+            if topic_data:
+                output += f"\n\n=== FOCUS: {matched_topic.title()} ===\n"
+                output += f"Your negative rate: {topic_data.get('target_negative_rate', 0):.1%}\n"
+                output += f"Neighbors' negative rate: {topic_data.get('neighbors_negative_rate', 0):.1%}\n"
+                output += f"Gap: {topic_data.get('negative_rate_gap', 0):+.1%}\n"
+                output += f"Classification: {topic_data.get('kind', 'neutral').upper()}\n"
+            else:
+                output += f"\n\n=== FOCUS: {matched_topic.title()} ===\n"
+                output += f"No specific data found for '{matched_topic}'. Try get_topic_evidence for review quotes.\n"
+        
+        return output
 
     def get_topic_evidence(self, topic: str, limit: int = 5) -> str:
         """
-        Get evidence sentences for a specific topic.
+        Get actual review sentences for a specific topic - USE THIS when user asks about a specific topic!
+        
+        This returns real guest review quotes that mention the topic, helping you understand
+        what guests actually say about responsiveness, wifi, cleanliness, etc.
         
         Args:
-            topic: Topic to get evidence for (e.g., "wifi and internet quality")
-            limit: Max number of evidence items
+            topic: The NLP topic name. Must use exact topic names:
+                   - "host communication and responsiveness" (for responsiveness questions)
+                   - "wifi and internet quality" (for wifi/internet questions)
+                   - "cleanliness and hygiene" (for cleanliness questions)
+                   - "check-in and check-out process" (for check-in questions)
+                   - "value for money and pricing" (for price/value questions)
+                   - "noise and sound disturbances" (for noise questions)
+                   - "bed comfort and sleep quality" (for bed/sleep questions)
+                   - "location and neighborhood" (for location questions)
+            limit: Max number of evidence items to return (default 5)
+        
+        Returns:
+            Actual review quotes mentioning the topic with sentiment labels
         """
         if not DATABRICKS_AVAILABLE:
             return "Evidence retrieval not available."
         
-        evidence = get_nlp_evidence(topic=topic, limit=limit)
+        # Try to match user's term to exact topic name
+        topic_lower = topic.lower().strip()
+        matched_topic = self.TOPIC_ALIASES.get(topic_lower, topic)
+        
+        # Also check if any NLP topic contains the search term
+        if matched_topic == topic:  # No alias found
+            for nlp_topic in self.NLP_TOPICS:
+                if topic_lower in nlp_topic.lower():
+                    matched_topic = nlp_topic
+                    break
+        
+        print(f"[CompetitorAnalyst] Getting evidence for topic: '{matched_topic}'")
+        
+        evidence = get_nlp_evidence(topic=matched_topic, limit=limit)
         
         if not evidence:
-            return f"No evidence found for topic: {topic}"
+            return f"No evidence found for topic: {matched_topic}. Try one of: {', '.join(self.NLP_TOPICS[:5])}..."
         
-        output = [f"=== Evidence for '{topic}' ===\n"]
+        output = [f"=== Guest Reviews about '{matched_topic}' ===\n"]
         for e in evidence:
             text = e.get("sentence_text", "")[:300]
             sentiment = e.get("sentiment_label", "unknown")
             role = e.get("evidence_role", "")
             prop_id = e.get("evidence_property_id", "")
             
-            output.append(f"[{sentiment.upper()}] (Property {prop_id}, {role})")
+            # Make it clear if this is about the user's property or neighbors
+            source = "YOUR PROPERTY" if role == "target" else "NEIGHBOR"
+            
+            output.append(f"[{sentiment.upper()}] ({source} - Property {prop_id})")
             output.append(f'  "{text}"')
             output.append("")
         
