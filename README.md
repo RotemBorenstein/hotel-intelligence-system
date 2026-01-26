@@ -27,7 +27,7 @@ The system uses **LangGraph** for stateful workflow orchestration and supports m
 
 ## System Architecture
 
-![System Architecture](images/Untitled%20diagram-2026-01-05-211127.png)
+![System Architecture](images/Architecture.PNG)
 
 The system follows a **coordinator-specialist pattern** with the following components:
 
@@ -48,18 +48,7 @@ The system implements a sophisticated memory management strategy:
 - **Summary**: Compresses older turns into a running summary to prevent token bloat
 - **Entities**: Persists extracted entities (hotels, metrics, competitors, locations, topics) across the conversation
 
-![Detailed System Diagram](images/Gemini_Generated_Image_dmyusfdmyusfdmyu.png)
-
-This diagram shows the complete workflow including:
-- Query routing to specialist agents
-- Integration with the shared LLM service (Gemini with Llama-3 fallback)
-- Vector similarity search using Pinecone
-- Various data scrapers (Google Maps, TripAdvisor, Web Search)
-- Memory management and context flow
-
 ## Specialist Agents
-
-![Specialist Agents Overview](images/Gemini_Generated_Image_gt90rmgt90rmgt90.png)
 
 The system includes four specialized agents, each with distinct responsibilities:
 
@@ -242,8 +231,193 @@ The coordinator maintains an `agent_queue` in state and executes agents sequenti
 ### Prerequisites
 
 - Python 3.9+
-- Node.js (for BrightData MCP, optional)
-- Chromium browser (for Playwright)
+- Databricks workspace (recommended) OR local development environment
+- Node.js (for BrightData MCP, optional - only for local development)
+- Chromium browser (for Playwright - only for local development)
+
+## Running on Databricks (Recommended)
+
+The system is designed to run on **Databricks**, which provides:
+- Built-in Spark for data processing
+- Long-running job support (15+ minute ML analyses)
+- Native integration with Azure Blob Storage
+- Better resource management for ML workloads
+
+### Step 1: Connect Repository to Databricks
+
+1. **Open Databricks Workspace** → Navigate to **Repos** in the sidebar
+
+2. **Add Repository**:
+   - Click **Add Repo** or **Create Repo**
+   - Select **Git** as the source
+   - Enter your repository URL: `https://github.com/yourusername/hotel-intelligence-system.git`
+   
+   ![Integration Step 1](images/Integration_step1.png)
+
+3. **Configure Repository**:
+   - Choose a **Repo Name** (e.g., `hotel-intelligence-system`)
+   - Select **Branch**: `main` (or your default branch)
+   - Click **Create Repo**
+   
+   ![Integration Step 2](images/Integration_step2.png)
+
+4. **Verify Repository**:
+   - The repo will appear under `/Workspace/Users/<your-email>/hotel-intelligence-system`
+   - You should see the project structure with `agents/`, `tests/`, `docs/`, etc.
+   
+   ![Integration Step 3](images/Integration_step3.png)
+
+### Step 2: Create or Select a Cluster
+
+1. **Navigate to Compute** → **Create Cluster** (or use existing)
+2. **Cluster Configuration**:
+   - **Cluster Mode**: Standard (single user) or Shared
+   - **Databricks Runtime**: 13.3 LTS or later (Python 3.11)
+   - **Node Type**: Standard (e.g., `i3.xlarge` or larger for ML workloads)
+   - **Workers**: 1-2 workers recommended for development
+
+### Step 3: Install Dependencies on Cluster
+
+**Option A: Using Cluster Libraries (Recommended)**
+
+1. Go to your cluster → **Libraries** tab
+2. Click **Install New**
+3. Install from **PyPI**:
+   ```
+   langchain==0.2.16
+   langchain-core==0.2.39
+   langchain-google-genai==1.0.10
+   langchain-huggingface==0.0.3
+   langchain-pinecone==0.1.3
+   langgraph>=0.2.0
+   langchain-groq>=0.1.0
+   python-dotenv==1.0.1
+   pinecone-client==5.0.1
+   ```
+
+**Option B: Using Notebook Cell (Alternative)**
+
+Create a notebook cell and run:
+```python
+%pip install langchain==0.2.16 langchain-core==0.2.39 langchain-google-genai==1.0.10 langchain-huggingface==0.0.3 langchain-pinecone==0.1.3 langgraph>=0.2.0 langchain-groq>=0.1.0 python-dotenv==1.0.1 pinecone-client==5.0.1
+```
+
+### Step 4: Configure Environment Variables
+
+**On Databricks, environment variables are set at the cluster level:**
+
+1. **Go to your Cluster** → **Configuration** tab
+2. **Click "Edit"** to modify cluster settings
+   
+   ![Environment Variables Step 1](images/Env_Var_step1.png)
+
+3. **Scroll to Advanced Options** → Expand **Environment Variables**
+   
+   ![Environment Variables Step 2](images/Env_Var_step2.png)
+
+4. **Add the following variables** (replace with your actual API keys):
+   ```
+   PINECONE_API_KEY=your_pinecone_api_key
+   GOOGLE_API_KEY=your_gemini_api_key
+   GROQ_API_KEY=your_groq_api_key
+   BRIGHTDATA_API_TOKEN=your_brightdata_token
+   ```
+   
+   ![Environment Variables Step 3](images/Env_Var_step3.png)
+
+5. **Save the cluster configuration** - The cluster will restart to apply the new environment variables
+
+**Required Environment Variables:**
+- `PINECONE_API_KEY` - Your Pinecone API key (required for vector database)
+- `GOOGLE_API_KEY` - Your Google Gemini API key (required for LLM)
+- `GROQ_API_KEY` - Your Groq API key (required for fallback LLM)
+- `BRIGHTDATA_API_TOKEN` - Your Bright Data API token (optional, for web scraping)
+
+**Alternative: Using Databricks Secrets (More Secure)**
+
+1. **Create Secret Scope**:
+   - Go to **Settings** → **User Settings** → **Access Tokens**
+   - Or use Databricks CLI: `databricks secrets create-scope --scope hotel-intel`
+
+2. **Add Secrets**:
+   ```bash
+   databricks secrets put --scope hotel-intel --key PINECONE_API_KEY
+   databricks secrets put --scope hotel-intel --key GOOGLE_API_KEY
+   databricks secrets put --scope hotel-intel --key GROQ_API_KEY
+   databricks secrets put --scope hotel-intel --key BRIGHTDATA_API_TOKEN
+   ```
+
+3. **Access in Code** (already implemented in `agents/config_databricks.py`):
+   ```python
+   from agents.config_databricks import get_secret
+   
+   api_key = get_secret("PINECONE_API_KEY")  # Automatically uses secrets or env vars
+   ```
+
+### Step 5: Create Databricks Notebook
+
+1. **In your Repo**, create a new notebook: `Hotel_Intelligence_Agent.ipynb`
+2. **Copy the interface code** from one of these options:
+
+**Option A: Native Databricks Interface** (Recommended - No external dependencies)
+- Copy code from `agents/databricks_native_interface.py`
+- Uses built-in Databricks widgets and `displayHTML()`
+- Most reliable for long-running jobs
+
+**Option B: Streamlit Interface** (Better UI, requires installation)
+- First install: `%pip install streamlit`
+- Copy code from `agents/streamlit_databricks.py`
+- Run with: `%sh streamlit run <path-to-file> --server.port 8501`
+
+3. **Update Configuration** in the notebook:
+   ```python
+   HOTEL_ID = "ABB_40458495"  # Your hotel ID
+   HOTEL_NAME = "Your Hotel Name"
+   CITY = "Your City"
+   ```
+
+4. **Update Import Paths** (if needed):
+   ```python
+   import sys
+   REPO_PATH = "/Workspace/Users/<your-email>/hotel-intelligence-system"
+   sys.path.insert(0, REPO_PATH)
+   sys.path.insert(0, f"{REPO_PATH}/agents")
+   ```
+
+### Step 6: Run the Notebook
+
+1. **Attach the notebook to your cluster** (with environment variables configured)
+2. **Run all cells** or run cells individually
+3. **Test with a simple query**:
+   ```
+   "What are my guests saying about my location?"
+   ```
+
+### Troubleshooting Databricks Setup
+
+**Issue: ModuleNotFoundError**
+- **Solution**: Ensure all dependencies are installed on the cluster
+- Check cluster libraries or run `%pip install <package>` in a notebook cell
+
+**Issue: Environment variables not found**
+- **Solution**: 
+  - Verify variables are set in cluster configuration
+  - Or use Databricks secrets (more secure)
+  - Check `agents/config_databricks.py` is using `get_secret()` correctly
+
+**Issue: Import errors (agents module not found)**
+- **Solution**: Verify repo path is correct in notebook:
+  ```python
+  sys.path.insert(0, "/Workspace/Users/<your-email>/hotel-intelligence-system")
+  ```
+
+**Issue: Long-running jobs timeout**
+- **Solution**: The coordinator already handles this with extended timeouts (15+ minutes for ML analyses)
+- Check `agents/coordinator.py` for `DATABRICKS_TIMEOUTS` configuration
+
+## Local Development (Alternative)
+
+If you prefer to run locally instead of Databricks:
 
 ### Step 1: Clone the Repository
 
@@ -258,7 +432,7 @@ cd hotel-intelligence-system
 pip install -r requirements.txt
 ```
 
-### Step 3: Install Playwright
+### Step 3: Install Playwright (for local scraping)
 
 ```bash
 pip install playwright
@@ -277,16 +451,16 @@ PINECONE_API_KEY=your_pinecone_api_key
 # Optional (for fallback LLM)
 GROQ_API_KEY=your_groq_api_key
 
-# Optional (for Bright Data MCP - Google search & scraping)
+# Optional (for Bright Data - Google search & scraping)
 BRIGHTDATA_API_TOKEN=your_brightdata_token
 BROWSER_AUTH=your_browser_auth_if_needed
 ```
 
-**Getting Bright Data API Token:**
-1. Go to https://brightdata.com/cp/
-2. Navigate to Settings → API tokens
-3. Create a new token with permissions for SERP API and Web Scraper
-4. Copy the token to your `.env` file
+**Getting API Keys:**
+- **Gemini API**: https://makersuite.google.com/app/apikey
+- **Pinecone API**: https://app.pinecone.io/
+- **Groq API**: https://console.groq.com/
+- **Bright Data API**: https://brightdata.com/cp/ → Settings → API tokens
 
 ### Step 5: Install Additional Tools (Optional)
 
@@ -297,7 +471,7 @@ pip install ddgs
 pip install duckduckgo-search
 ```
 
-For Bright Data integration:
+For Bright Data integration (local only):
 ```bash
 # MCP server (requires Node.js)
 npm install -g @brightdata/mcp
@@ -311,7 +485,37 @@ pip install mcp
 
 ## Usage
 
-### Interactive Chat Mode
+### Running on Databricks (Recommended)
+
+After completing the setup steps above:
+
+1. **Open your Databricks notebook** (`Hotel_Intelligence_Agent.ipynb`)
+2. **Attach to cluster** (with environment variables configured)
+3. **Run all cells** to initialize the system
+4. **Use the interface**:
+   - **Native Databricks**: Use the dropdown widget to select query types or enter custom queries
+   - **Streamlit**: Use the web interface at the displayed URL
+
+**Example Queries to Try:**
+- "What are my guests saying about my location?"
+- "What features should I improve to increase my rating?"
+- "How do I compare to my competitors?"
+- "Are there any events happening in my city this week?"
+
+### Example Conversations
+
+Here are real examples of conversations with the agent:
+
+**Example 1: Location Feedback**
+![Conversation Example 1](images/Conv1.PNG)
+
+**Example 2: Feature Improvement Analysis**
+![Conversation Example 2](images/Conv2.PNG)
+
+**Example 3: Competitive Analysis**
+![Conversation Example 3](images/Conv3.PNG)
+
+### Local Development (Alternative)
 
 Run the coordinator in interactive chat mode:
 
@@ -387,38 +591,38 @@ print(response)
 
 ### Running Tests
 
-Test scripts are located in `agents/Tests/`:
+Test scripts are located in `tests/`:
 
 ```bash
 # Test all agents (11 tests) - initialization, tools, validation, multi-agent
-python agents/Tests/test_all_agents.py
+python tests/test_all_agents.py
 
-# Test LangGraph integration (9 tests) - state, memory, routing
-python agents/Tests/LangGraph_Test
-
-# Check RAG database contents
-python agents/Tests/check_rag.py
+# Test coordinator on Databricks
+python tests/test_coordinator_databricks.py
 
 # Test web search tools
-python agents/Tests/test_web_search.py
+python tests/test_web_search.py
 
-# Test Bright Data MCP integration
-python agents/Tests/test_bright_data_mcp.py
+# Test Google Maps tools
+python tests/test_google_maps_tools.py
+
+# Test tool recovery mechanisms
+python tests/test_tool_recovery_databricks.py
 
 # User Testing Framework (interactive or automated)
-python agents/Tests/user_testing.py
-
-# Baseline Comparisons (Raw Data vs Simple Chatbot vs Full System)
-python agents/Tests/baseline_comparison.py
+python tests/user_testing.py
 ```
 
 **Test Coverage:**
 | Test Suite | Tests | What's Tested |
 |------------|-------|---------------|
 | `test_all_agents.py` | 11 | Agent init, anti-hallucination prompts, tools, validation, multi-agent state |
-| `LangGraph_Test` | 9 | Graph state, entity extraction, memory, routing, compression |
+| `test_coordinator_databricks.py` | 1 | Coordinator execution on Databricks |
+| `test_web_search.py` | Multiple | Web search tool functionality |
+| `test_google_maps_tools.py` | Multiple | Google Maps scraping tools |
 | `user_testing.py` | 15 scenarios | User satisfaction, feedback collection, scenario testing |
-| `baseline_comparison.py` | 5 queries | Raw data vs chatbot vs full system comparison |
+
+**Note**: Debug scripts and development utilities are in `scripts/` (not pushed to git).
 
 ## Data Ingestion
 
@@ -489,47 +693,76 @@ run_ingestion(
 ## Project Structure
 
 ```
-Agent_Pipeline_Testing/
+hotel-intelligence-system/
 │
-├── agents/
+├── agents/                    # Core agent code
 │   ├── __init__.py
-│   ├── base_agent.py           # Base class with LLM fallback and RAG utilities
-│   ├── coordinator.py          # LangGraph coordinator (main entry point)
-│   ├── graph_state.py          # State schema and memory configuration
-│   ├── entity_extractor.py     # Entity extraction (LLM + regex)
-│   ├── memory_manager.py       # Hybrid memory management
-│   ├── review_analyst.py       # Review analysis agent
-│   ├── competitor_analyst.py   # Competitor identification agent
-│   ├── market_intel.py         # Market intelligence agent
-│   ├── benchmark_agent.py      # Benchmarking agent
+│   ├── base_agent.py         # Base class with LLM fallback and RAG utilities
+│   ├── coordinator.py        # LangGraph coordinator (main entry point)
+│   ├── graph_state.py        # State schema and memory configuration
+│   ├── entity_extractor.py   # Entity extraction (LLM + regex)
+│   ├── memory_manager.py     # Hybrid memory management
+│   ├── review_analyst.py     # Review analysis agent
+│   ├── competitor_analyst.py # Competitor identification agent
+│   ├── market_intel.py       # Market intelligence agent
+│   ├── benchmark_agent.py    # Benchmarking agent
+│   ├── config_databricks.py  # Databricks configuration and secrets
+│   ├── databricks_tools.py   # Databricks-specific tools (NLP, LR analysis)
 │   │
-│   ├── utils/                  # Utility modules
+│   ├── utils/                # Utility modules
 │   │   ├── __init__.py
-│   │   ├── bright_data.py      # Bright Data MCP integration for Google search
-│   │   └── output_validator.py # Structured output validation to catch hallucinations
+│   │   ├── bright_data.py    # Bright Data SERP API integration
+│   │   ├── google_maps_scraper.py  # Google Maps scraping utilities
+│   │   └── output_validator.py    # Structured output validation
 │   │
-│   └── Tests/                  # Test scripts
-│       ├── __init__.py
-│       ├── test_all_agents.py  # All agents test suite (11 tests)
-│       ├── LangGraph_Test      # LangGraph integration tests (9 tests)
-│       ├── check_rag.py        # RAG database verification
-│       ├── test_web_search.py  # Web search tool testing
-│       └── test_bright_data_mcp.py  # Bright Data MCP testing
+│   └── [Interface Files]     # Databricks interface options
+│       ├── databricks_native_interface.py  # Native Databricks widgets
+│       ├── streamlit_databricks.py          # Streamlit interface
+│       └── html_interactive_interface.py    # HTML-based interface
 │
-├── data/
-│   ├── sampled_booking_data.parquet    # Booking.com dataset
-│   └── sampled_airbnb_data.parquet     # Airbnb dataset
+├── tests/                     # Test suite (pushed to git)
+│   ├── __init__.py
+│   ├── test_all_agents.py    # Comprehensive agent tests
+│   ├── test_coordinator_databricks.py  # Databricks coordinator tests
+│   ├── test_web_search.py    # Web search tool tests
+│   ├── test_google_maps_tools.py  # Google Maps tool tests
+│   ├── test_tool_recovery_databricks.py  # Tool recovery tests
+│   └── user_testing.py        # User testing framework
 │
-├── images/
-│   ├── Untitled diagram-2026-01-05-211127.png           # Architecture diagram
-│   ├── Gemini_Generated_Image_dmyusfdmyusfdmyu.png     # System flow diagram
-│   └── Gemini_Generated_Image_gt90rmgt90rmgt90.png     # Agent capabilities
+├── scripts/                   # Development utilities (gitignored)
+│   ├── ingestion/            # Data ingestion helper scripts
+│   ├── debug/                # Debug and diagnostic scripts
+│   └── databricks/           # Databricks-specific utility scripts
 │
-├── ingestion.py               # Data ingestion pipeline
-├── requirements.txt           # Python dependencies
-├── .env                       # Environment variables (not in repo)
-├── mcp.json                   # MCP configuration for BrightData
-└── README.md                  # This file
+├── docs/                      # Documentation
+│   ├── CHART_FIX_SUMMARY.md
+│   ├── EVALUATION_REPORT.md
+│   ├── SYSTEM_EVALUATION_REPORT.md
+│   └── TOKEN_OPTIMIZATION_EXAMPLE.md
+│
+├── data/                      # Data files (gitignored - large datasets)
+│   ├── sampled_booking_data.parquet
+│   └── sampled_airbnb_data.parquet
+│
+├── images/                    # Architecture diagrams and screenshots
+│   ├── Architecture.PNG      # System architecture diagram
+│   ├── Conv1.PNG             # Example conversation 1
+│   ├── Conv2.PNG             # Example conversation 2
+│   ├── Conv3.PNG             # Example conversation 3
+│   ├── Integration_step1.png # Git repo integration step 1
+│   ├── Integration_step2.png # Git repo integration step 2
+│   ├── Integration_step3.png # Git repo integration step 3
+│   ├── Env_Var_step1.png     # Environment variables setup step 1
+│   ├── Env_Var_step2.png     # Environment variables setup step 2
+│   └── Env_Var_step3.png     # Environment variables setup step 3
+│
+├── ingestion.py              # Main data ingestion pipeline
+├── requirements.txt          # Python dependencies
+├── .env                      # Environment variables (not in repo)
+├── mcp.json                  # MCP configuration for BrightData
+├── automated_test_results.json  # Test results (for README)
+├── baseline_comparison_results.json  # Comparison results (for README)
+└── README.md                 # This file
 ```
 
 ## Configuration
@@ -771,28 +1004,55 @@ class PricingAgent(BaseAgent):
 
 ### Common Issues
 
-**1. Playwright browser not found**
+**1. Databricks: ModuleNotFoundError**
+- **Solution**: Install dependencies on cluster (see Step 3 in Databricks setup)
+- Run `%pip install <package>` in a notebook cell if needed
+- Verify cluster libraries are installed and cluster is restarted
+
+**2. Databricks: Environment variables not found**
+- **Solution**: 
+  - Check cluster configuration → Advanced Options → Environment Variables
+  - Or use Databricks secrets (more secure): `dbutils.secrets.get("scope", "key")`
+  - Verify `agents/config_databricks.py` is using `get_secret()` correctly
+
+**3. Databricks: Import errors (agents module not found)**
+- **Solution**: Verify repo path in notebook:
+  ```python
+  REPO_PATH = "/Workspace/Users/<your-email>/hotel-intelligence-system"
+  sys.path.insert(0, REPO_PATH)
+  sys.path.insert(0, f"{REPO_PATH}/agents")
+  ```
+
+**4. Databricks: Long-running jobs timeout**
+- **Solution**: The coordinator handles this automatically (15+ min timeouts for ML analyses)
+- Check `agents/coordinator.py` for `DATABRICKS_TIMEOUTS` configuration
+- Ensure cluster has sufficient resources
+
+**5. Pinecone connection error**
+- Verify `PINECONE_API_KEY` is set (cluster env vars or secrets)
+- Check index name matches in code (`airbnb-index` by default)
+- Verify network connectivity from Databricks to Pinecone
+
+**6. Gemini quota exceeded**
+- System auto-falls back to Groq/Llama-3
+- Ensure `GROQ_API_KEY` is set in cluster environment variables
+- Check fallback is working: Look for `[LLM] WARNING: Gemini quota hit!` messages
+
+**7. Empty search results**
+- Verify data was ingested (`python ingestion.py` or use ingestion scripts)
+- Check namespace names match (`airbnb_reviews`, `booking_reviews`, etc.)
+- Ensure hotel_id filter is correct (format: `ABB_40458495` or `BKG_177691`)
+
+**8. Local: Playwright browser not found**
 ```bash
 playwright install chromium
 ```
 
-**2. Pinecone connection error**
-- Verify `PINECONE_API_KEY` in `.env`
-- Check index name matches in code
-
-**3. Gemini quota exceeded**
-- System auto-falls back to Groq
-- Ensure `GROQ_API_KEY` is set
-
-**4. Scraping fails (403/CAPTCHA)**
+**9. Local: Scraping fails (403/CAPTCHA)**
 - Google/TripAdvisor may block requests
 - Try different user-agent strings
 - Consider adding delays between requests
-
-**5. Empty search results**
-- Verify data was ingested (`python ingestion.py`)
-- Check namespace names match
-- Ensure hotel_id filter is correct
+- Note: Playwright scraping is disabled on Databricks (use Bright Data APIs instead)
 
 ## Contributing
 

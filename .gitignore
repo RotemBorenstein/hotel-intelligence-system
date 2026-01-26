@@ -59,8 +59,12 @@ data/*.parquet
 *.json
 !mcp.json
 
+# Scripts (development/debugging tools - not part of core system)
+scripts/
+
 # Logs
 *.log
+hs_err_pid*.log
 
 # OS
 Thumbs.db
@@ -70,6 +74,12 @@ Thumbs.db
 *.tmp
 nul
 *.bak
+
+# Test results (keep specific ones for README)
+# automated_test_results.json - keep for README
+# baseline_comparison_results.json - keep for README
+*_test_results.json
+ingestion_progress.json
 
 # Old/Review files (optional - keep if needed)
 old files/
