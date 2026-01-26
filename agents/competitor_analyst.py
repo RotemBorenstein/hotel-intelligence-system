@@ -117,7 +117,7 @@ class CompetitorAnalystAgent(BaseAgent):
         # List available topics for the agent
         topics_list = ", ".join([f'"{t}"' for t in self.NLP_TOPICS[:5]]) + "..."
         
-        return f"""You are a friendly Competitor Analyst helping the owner of {self.hotel_name} in {self.city}.
+        return f"""{self.get_chart_instruction()}You are a friendly Competitor Analyst helping the owner of {self.hotel_name} in {self.city}.
 
 ACCURACY RULES:
 1. Only report data from tool outputs - never invent statistics.

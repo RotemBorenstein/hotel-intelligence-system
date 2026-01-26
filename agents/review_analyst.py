@@ -78,7 +78,7 @@ class ReviewAnalystAgent(BaseAgent):
         return relevant, other
 
     def get_system_prompt(self) -> str:
-        return f"""You are a friendly Review Analyst helping the owner of {self.hotel_name} in {self.city}.
+        return f"""{self.get_chart_instruction()}You are a friendly Review Analyst helping the owner of {self.hotel_name} in {self.city}.
 
 CRITICAL ACCURACY RULES:
 1. Only cite reviews that actually exist in tool outputs - NEVER invent or infer.

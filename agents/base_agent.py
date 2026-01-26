@@ -270,6 +270,33 @@ class BaseAgent(ABC):
             print(f"[RAG] Search error in {namespace}: {e}")
             return []
 
+    @staticmethod
+    def get_chart_instruction() -> str:
+        """
+        Shared instruction for all agents: charts must appear FIRST in responses.
+        This ensures visualizations are prioritized and survive truncation.
+        """
+        return """**CRITICAL CHART FORMATTING RULE - YOU MUST FOLLOW THIS EXACTLY:**
+
+If ANY tool output contains chart links (📊) or the text "CHARTS (PUT FIRST IN RESPONSE)", your response structure MUST be:
+
+1. **FIRST: Copy ALL chart links exactly as shown** (e.g., "📊 [Chart Name](url)")
+2. **THEN: Add a blank line**
+3. **THEN: Write your analysis and recommendations**
+
+**EXAMPLE CORRECT FORMAT:**
+```
+📊 [Impacts Chart](https://...)
+📊 [Gain Chart](https://...)
+
+Based on the analysis, here are the features to improve...
+```
+
+**NEVER put charts at the end. ALWAYS start with charts if they appear in tool output.**
+**This is a hard requirement - charts are essential visualizations that must be visible first.**
+
+"""
+
     @abstractmethod
     def get_system_prompt(self) -> str:
         pass

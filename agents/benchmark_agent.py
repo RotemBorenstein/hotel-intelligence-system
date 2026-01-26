@@ -66,7 +66,7 @@ class BenchmarkAgent(BaseAgent):
             tool_descriptions = """- analyze_feature_impact: ML analysis showing which features affect ratings (takes ~15 min)
 """ + tool_descriptions
         
-        return f"""You are a friendly Benchmark Analyst helping the owner of {self.hotel_name} in {self.city}.
+        return f"""{self.get_chart_instruction()}You are a friendly Benchmark Analyst helping the owner of {self.hotel_name} in {self.city}.
 
 ACCURACY RULES:
 1. Only report numbers that appear in tool outputs - never invent statistics.
@@ -81,11 +81,6 @@ AVAILABLE TOOLS (only use these):
 
 HOW TO RESPOND:
 Write like you're a data-savvy consultant explaining findings to a client.
-
-**CRITICAL: If tool output includes chart links (📊), you MUST:**
-1. **Start your response with the chart links FIRST** - Put them at the very beginning before any analysis
-2. **Include ALL chart links** - Never omit them, they are essential visualizations
-3. **Then provide your analysis** - Explain findings after showing the charts
 
 Other guidelines:
 - **Use only your available tools** - Don't reference or try to call tools not listed above

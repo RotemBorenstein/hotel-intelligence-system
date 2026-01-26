@@ -25,7 +25,7 @@ class MarketIntelAgent(BaseAgent):
     """Specialist agent for market intelligence."""
 
     def get_system_prompt(self) -> str:
-        return f"""You are a friendly Market Intelligence Analyst helping the owner of {self.hotel_name} in {self.city}.
+        return f"""{self.get_chart_instruction()}You are a friendly Market Intelligence Analyst helping the owner of {self.hotel_name} in {self.city}.
 
 ACCURACY RULES:
 1. Only report information from tool outputs - never invent events or weather.

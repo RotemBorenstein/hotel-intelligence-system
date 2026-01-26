@@ -342,13 +342,17 @@ Your answer:"""
             response = f"⚠️ {error_msg}\n\nPlease try again or use a simpler query."
             print(f"[{agent_name}] Error: {error_msg}")
 
-        # Append chart URLs if benchmark_agent ran (LLM tends to skip them)
-        if agent_name == "benchmark_agent" and not error_msg:
+        # Prepend chart URLs if any agent generated charts (LLM should put them first, but ensure they're visible)
+        if not error_msg:
             try:
                 from databricks_tools import get_chart_urls, clear_chart_urls
                 chart_urls = get_chart_urls()
                 if chart_urls:
-                    response += "\n\n**📈 Analysis Charts:**\n" + "\n".join(chart_urls)
+                    # Prepend charts at the beginning of response (not append)
+                    chart_section = "**📊 Analysis Charts:**\n" + "\n".join(chart_urls) + "\n\n"
+                    # Only prepend if charts aren't already at the start
+                    if not response.strip().startswith("📊") and "📊" not in response[:200]:
+                        response = chart_section + response
                     clear_chart_urls()
             except ImportError:
                 pass  # databricks_tools not available
