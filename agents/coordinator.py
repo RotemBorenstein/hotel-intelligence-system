@@ -45,21 +45,26 @@ class LangGraphCoordinator:
 
     ROUTING_PROMPT = """Route this query to the appropriate agent(s).
 
-ROUTING RULES:
+ROUTING RULES (agents are mutually exclusive - choose ONE):
 - Guest feedback/reviews for MY hotel only → review_analyst
-- Compare with neighbors/competitors → competitor_analyst
-- Feature impact / "Why is my rating X?" / rankings → benchmark_agent
+- Compare with neighbors/competitors OR topic-specific comparisons (wifi, cleanliness, etc.) → competitor_analyst
+- Feature impact analysis / "Why is my rating X?" / rankings by metrics → benchmark_agent  
 - Events, weather, attractions, external factors → market_intel
-- "Full competitive analysis" → competitor_analyst, benchmark_agent
+
+⚠️ IMPORTANT: benchmark_agent and competitor_analyst are MUTUALLY EXCLUSIVE.
+   - Use competitor_analyst for: "How do I compare?", "What are my weaknesses?", topic comparisons
+   - Use benchmark_agent for: "Why is my rating X?", "What features matter?", rankings
+   - If query asks for both types of analysis, choose the ONE that best matches the primary intent.
 
 Available: review_analyst, competitor_analyst, benchmark_agent, market_intel
 
 Context: {context}
 Query: {query}
 
-RESPOND WITH ONLY agent names separated by commas. NO explanation. Examples:
+RESPOND WITH ONLY ONE agent name. NO commas. NO explanation. Examples:
 - review_analyst
-- competitor_analyst, benchmark_agent
+- competitor_analyst
+- benchmark_agent
 - market_intel
 
 Your answer:"""
@@ -69,16 +74,22 @@ Your answer:"""
     → review_analyst (single hotel, no comparison)
 
     Query: "How do my reviews compare to neighbors?"
-    → competitor_analyst (comparison, uses NLP tool)
+    → competitor_analyst (comparison using NLP tool)
 
     Query: "What are my weaknesses vs competition?"
-    → competitor_analyst (comparison, uses NLP tool)
+    → competitor_analyst (comparison using NLP tool)
+
+    Query: "How responsive am I compared to competitors?"
+    → competitor_analyst (topic-specific comparison)
 
     Query: "Why is my rating lower than competitors?"
-    → benchmark_agent (feature impact, uses LR tool)
+    → benchmark_agent (feature impact using LR tool)
 
     Query: "How can I improve my rating?"
-    → benchmark_agent (feature impact, uses LR tool)
+    → benchmark_agent (feature impact analysis)
+
+    Query: "What features impact ratings most?"
+    → benchmark_agent (feature impact using LR tool)
 
     Query: "Rank hotels by price"
     → benchmark_agent (simple ranking)
@@ -86,8 +97,8 @@ Your answer:"""
     Query: "Are there events this weekend?"
     → market_intel
 
-    Query: "Give me a full competitive analysis"
-    → competitor_analyst, benchmark_agent (multi-agent)
+    Query: "Give me a competitive analysis"
+    → competitor_analyst (primary intent is comparison)
     """
 
     def __init__(self, hotel_id: str, hotel_name: str, city: str):
