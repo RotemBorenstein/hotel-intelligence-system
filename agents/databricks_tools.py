@@ -17,11 +17,11 @@ from typing import Optional, Dict, Any, List
 # ===========================================
 
 # Notebook paths (update if cloned to different location)
-NLP_NOTEBOOK_PATH = "/Workspace/Users/alon-gilad@campus.technion.ac.il/(Clone) NLP Tool For Review Analysis"
-LR_NOTEBOOK_PATH = "/Workspace/Users/alon-gilad@campus.technion.ac.il/(Alon Clone) linear regression"
+NLP_NOTEBOOK_PATH = "/Workspace/Users/rborenstein@campus.technion.ac.il/NLP Tool For Review Analysis"
+LR_NOTEBOOK_PATH = "/Workspace/Users/rborenstein@campus.technion.ac.il/(Clone) (Clone) (Clone) (Clone) linear regression"
 
 # Data paths
-DELTA_PATH = "/mnt/lab94290/cluster_19/airbnb_h3_simvector"
+DELTA_PATH =  "/mnt/lab94290/cluster_19/airbnb_data_updateddd"  #"/mnt/lab94290/cluster_19/airbnb_h3_simvector"
 NLP_OUTPUT_BASE = "/mnt/lab94290/cluster_19/nlp_outputs"
 
 # FileStore path for charts (accessible via URL)
