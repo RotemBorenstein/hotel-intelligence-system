@@ -9,6 +9,7 @@ when this module is loaded outside of Databricks.
 """
 
 import json
+import os
 from typing import Optional, Dict, Any, List
 
 
@@ -16,9 +17,31 @@ from typing import Optional, Dict, Any, List
 # CONFIGURATION
 # ===========================================
 
-# Notebook paths (update if cloned to different location)
-NLP_NOTEBOOK_PATH = "/Workspace/Users/rborenstein@campus.technion.ac.il/NLP Tool For Review Analysis"
-LR_NOTEBOOK_PATH = "/Workspace/Users/rborenstein@campus.technion.ac.il/(Clone) (Clone) (Clone) (Clone) linear regression"
+# Notebook paths (env vars override; fallback to current hardcoded paths)
+def _resolve_notebook_path(env_var: str, fallback_path: str) -> str:
+    path = os.getenv(env_var)
+    return path or fallback_path
+
+
+def _notebook_path_error(notebook_path: str, env_var: str) -> Dict[str, str]:
+    return {
+        "status": "error",
+        "error_message": (
+            "Notebook path not found or inaccessible.\n"
+            f"Path: {notebook_path}\n"
+            f"Set {env_var} to the correct notebook path and retry."
+        )
+    }
+
+
+NLP_NOTEBOOK_PATH = _resolve_notebook_path(
+    "DATABRICKS_NLP_NOTEBOOK_PATH",
+    "/Workspace/Users/rborenstein@campus.technion.ac.il/(Clone) (Clone) NLP Tool For Review Analysis"
+)
+LR_NOTEBOOK_PATH = _resolve_notebook_path(
+    "DATABRICKS_LR_NOTEBOOK_PATH",
+    "/Workspace/Users/rborenstein@campus.technion.ac.il/(Clone) (Alon Clone) linear regression"
+)
 
 # Data paths
 DELTA_PATH =  "/mnt/lab94290/cluster_19/airbnb_data_updateddd"  #"/mnt/lab94290/cluster_19/airbnb_h3_simvector"
@@ -239,6 +262,9 @@ def run_nlp_analysis(
                 "status": "error",
                 "error_message": f"Analysis timed out after {timeout_seconds} seconds. Try increasing timeout."
             }
+        error_msg_lower = error_msg.lower()
+        if "not found" in error_msg_lower or "does not exist" in error_msg_lower:
+            return _notebook_path_error(NLP_NOTEBOOK_PATH, "DATABRICKS_NLP_NOTEBOOK_PATH")
         return {
             "status": "error",
             "error_message": error_msg
@@ -407,6 +433,9 @@ def run_lr_analysis(
                 "status": "error",
                 "error_message": f"Analysis timed out after {timeout_seconds} seconds."
             }
+        error_msg_lower = error_msg.lower()
+        if "not found" in error_msg_lower or "does not exist" in error_msg_lower:
+            return _notebook_path_error(LR_NOTEBOOK_PATH, "DATABRICKS_LR_NOTEBOOK_PATH")
         return {
             "status": "error",
             "error_message": error_msg
@@ -515,7 +544,9 @@ def format_nlp_results(
     topics: List[Dict],
     neighbors: List[Dict],
     include_evidence: bool = False,
-    evidence: Optional[List[Dict]] = None
+    evidence: Optional[List[Dict]] = None,
+    charts: Optional[Dict[str, str]] = None,
+    property_id: Optional[str] = None
 ) -> str:
     """
     Format NLP analysis results for LLM consumption.
@@ -525,11 +556,41 @@ def format_nlp_results(
         neighbors: Neighbor list
         include_evidence: Whether to include evidence sentences
         evidence: Evidence data if include_evidence is True
+        charts: Dict of chart_name -> base64 encoded image data
+        property_id: Property ID for saving charts
         
     Returns:
         Formatted string for agent response
     """
     output_lines = []
+    
+    # PROCESS CHARTS FIRST - put at top so they survive truncation
+    global _last_chart_urls
+    chart_urls = []
+    
+    if charts and property_id:
+        raw_id = extract_raw_id(property_id) if property_id else "unknown"
+        
+        for chart_name, b64_data in charts.items():
+            # Handle both direct base64 strings and nested dict with 'data' key
+            if isinstance(b64_data, dict):
+                b64_data = b64_data.get("data") or b64_data.get("base64") or b64_data.get("image")
+            
+            if b64_data and isinstance(b64_data, str):
+                url = save_chart_to_filestore(b64_data, chart_name, raw_id)
+                if url:
+                    # Create clickable markdown link
+                    display_name = chart_name.replace("_", " ").title()
+                    chart_urls.append(f"📊 [{display_name}]({url})")
+        
+        # Store URLs for later retrieval
+        _last_chart_urls = chart_urls.copy()
+    
+    # Add chart links at TOP
+    if chart_urls:
+        output_lines.append("📊 CHARTS (PUT FIRST IN RESPONSE):")
+        output_lines.extend(chart_urls)
+        output_lines.append("")
     
     # Neighbors section
     if neighbors:
