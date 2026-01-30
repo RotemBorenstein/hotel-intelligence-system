@@ -106,11 +106,10 @@ class CompetitorAnalystAgent(BaseAgent):
 
     def get_system_prompt(self) -> str:
         # Build tool descriptions based on availability
-        tool_descriptions = """- find_competitors_geo: Quick search for nearby competitors
-- get_competitor_details: Details about a specific competitor"""
+        tool_descriptions = """- get_competitor_details: Details about a specific competitor"""
         
         if DATABRICKS_AVAILABLE and is_airbnb_property(self.hotel_id):
-            tool_descriptions = """- analyze_vs_neighbors: Deep NLP analysis comparing reviews across all topics (takes 5-10 min)
+            tool_descriptions = """- analyze_vs_neighbors: PRIMARY TOOL. Deep NLP analysis comparing reviews across all topics. ALWAYS use this first for any competitor search or comparison!
 """ + tool_descriptions + """
 - get_topic_evidence: Get specific review evidence for a topic - USE THIS when user asks about a specific topic!"""
         
@@ -161,7 +160,7 @@ Property: {self.hotel_name} (ID: {self.hotel_id}) in {self.city}
 
     def get_tools(self) -> list:
         tools = [
-            self.find_competitors_geo,
+            # self.find_competitors_geo, # Removed to force use of analyze_vs_neighbors
             self.get_competitor_details,
         ]
         
