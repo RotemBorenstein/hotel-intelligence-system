@@ -37,12 +37,14 @@ def _notebook_path_error(notebook_path: str, env_var: str) -> Dict[str, str]:
 NLP_NOTEBOOK_PATH = _resolve_notebook_path(
     "DATABRICKS_NLP_NOTEBOOK_PATH",
     #"/Workspace/Users/rborenstein@campus.technion.ac.il/(Clone) (Clone) NLP Tool For Review Analysis"
-    "/Workspace/Users/alon-gilad@campus.technion.ac.il/(Clone) NLP Tool For Review Analysis"
+    #"/Workspace/Users/alon-gilad@campus.technion.ac.il/(Clone) NLP Tool For Review Analysis"
+    "/Workspace/Shared/(Clone) (Clone) NLP Tool For Review Analysis"
 )
 LR_NOTEBOOK_PATH = _resolve_notebook_path(
     "DATABRICKS_LR_NOTEBOOK_PATH",
     #"/Workspace/Users/rborenstein@campus.technion.ac.il/(Clone) (Alon Clone) linear regression"
-    "/Workspace/Users/alon-gilad@campus.technion.ac.il/(Alon Clone) linear regression"
+    #"/Workspace/Users/alon-gilad@campus.technion.ac.il/(Alon Clone) linear regression"
+    "/Workspace/Shared/(Clone) (Alon Clone) linear regression"
 )
 
 # Data paths
